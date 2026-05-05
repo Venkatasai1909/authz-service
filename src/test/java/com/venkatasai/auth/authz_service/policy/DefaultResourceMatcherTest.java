@@ -194,9 +194,10 @@ class DefaultResourceMatcherTest {
         }
 
         @Test
-        void doesNotMatchShortPath_onlyThreeSegments() {
-            // Non-terminal * consumed wallet-789; 'transactions' matches; but terminal * needs at least one more
-            assertThat(matcher.matches("wallets/*/transactions/*", "wallets/wallet-456/transactions")).isFalse();
+        void matchesThreeSegmentPath_terminalWildcardAbsorbsZero() {
+            // Terminal '*' absorbs zero remaining segments: "wallets/*/transactions/*" matches
+            // "wallets/wallet-456/transactions" (the collection endpoint, 3 segments).
+            assertThat(matcher.matches("wallets/*/transactions/*", "wallets/wallet-456/transactions")).isTrue();
         }
 
         @Test

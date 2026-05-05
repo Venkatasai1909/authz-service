@@ -43,14 +43,14 @@ public class AuthorizationServiceImpl implements AuthorizationService {
 
         log.debug("Mapped to internal userId={}", user.getUserId());
 
-        // Step 2: Build auth context (maps method→action, normalizes path)
+        // Step 3: Build auth context (maps method→action, normalizes path)
         // Must happen before DB query so we query by the correct action ("read"/"write"/"delete")
         AuthContext authContext = authorizationMapper.mapToAuthContext(
                 user, request.getMethod(), request.getPath());
         log.debug("AuthContext: userId={} action={} path={}",
                 authContext.getUserId(), authContext.getAction(), authContext.getPath());
 
-        // Step 3: Load permissions for this user + action
+        // Step 4: Load permissions for this user + action
         List<Permission> permissions = permissionRepository.findByUserIdAndAction(
                 authContext.getUserId(), authContext.getAction());
         log.debug("Loaded {} permission(s) from DB for userId={} action={}",

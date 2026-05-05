@@ -10,12 +10,14 @@ import com.venkatasai.auth.authz_service.exception.AuthenticationException;
 import com.venkatasai.auth.authz_service.mapper.AuthorizationMapper;
 import com.venkatasai.auth.authz_service.model.Decision;
 import com.venkatasai.auth.authz_service.model.Permission;
+import com.venkatasai.auth.authz_service.model.User;
 import com.venkatasai.auth.authz_service.model.UserPrincipal;
 import com.venkatasai.auth.authz_service.policy.engine.PolicyEngine;
 import com.venkatasai.auth.authz_service.policy.matcher.DefaultResourceMatcher;
 import com.venkatasai.auth.authz_service.policy.resolver.DenyOverridesResolver;
 import com.venkatasai.auth.authz_service.policy.scorer.SpecificityScorer;
 import com.venkatasai.auth.authz_service.repository.PermissionRepository;
+import com.venkatasai.auth.authz_service.repository.UserRepository;
 import com.venkatasai.auth.authz_service.service.impl.AuthorizationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,11 +42,14 @@ class AuthorizationServiceImplTest {
     @Mock
     private PermissionRepository permissionRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
     private AuthorizationServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        // Wire real engine components; only mock JWT and DB
+        // Wire real engine components; only mock JWT, user lookup, and DB
         PolicyEngine policyEngine = new PolicyEngine(
                 new DefaultResourceMatcher(),
                 new SpecificityScorer(),
@@ -54,11 +59,21 @@ class AuthorizationServiceImplTest {
         AuthorizationFactory factory = new AuthorizationFactory(List.of(strategy));
         AuthorizationManager manager = new AuthorizationManager(factory);
 
-        service = new AuthorizationServiceImpl(jwtAuthenticator, permissionRepository, manager, new AuthorizationMapper());
+        service = new AuthorizationServiceImpl(
+                jwtAuthenticator, permissionRepository, manager, new AuthorizationMapper(), userRepository);
     }
 
-    private UserPrincipal principal(String userId) {
-        return UserPrincipal.builder().userId(userId).build();
+    /**
+     * Sets up the two-step identity resolution:
+     *  1. JWT "tok" → externalUserId (Clerk sub claim)
+     *  2. externalUserId → internal User with internalUserId (DB lookup)
+     */
+    private void mockIdentity(String token, String externalUserId, String internalUserId) {
+        when(jwtAuthenticator.authenticate(token))
+                .thenReturn(UserPrincipal.builder().userId(externalUserId).build());
+        when(userRepository.findByExternalUserId(externalUserId))
+                .thenReturn(java.util.Optional.of(
+                        User.builder().id(1).userId(internalUserId).externalUserId(externalUserId).build()));
     }
 
     private Permission allow(String userId, String action, String resource) {
@@ -74,8 +89,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Valid token + matching allow permission → ALLOW response")
     void validToken_allowPermission_returnsAllow() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user123"));
+        mockIdentity("tok", "ext-user123", "user123");
         when(permissionRepository.findByUserIdAndAction("user123", "read"))
                 .thenReturn(List.of(allow("user123", "read", "transactions")));
 
@@ -83,15 +97,14 @@ class AuthorizationServiceImplTest {
 
         assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
         assertThat(response.getUserId()).isEqualTo("user123");
-        assertThat(response.getReason()).contains("granted");
+        assertThat(response.getReason()).isEqualTo("User has read permission for transactions");
         assertThat(response.getMatchedPermissions()).hasSize(1);
     }
 
     @Test
     @DisplayName("Valid token + explicit deny rule → DENY response")
     void validToken_denyPermission_returnsDeny() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user123"));
+        mockIdentity("tok", "ext-user123", "user123");
         when(permissionRepository.findByUserIdAndAction("user123", "delete"))
                 .thenReturn(List.of(deny("user123", "delete", "transactions")));
 
@@ -99,21 +112,20 @@ class AuthorizationServiceImplTest {
 
         assertThat(response.getDecision()).isEqualTo(Decision.DENY);
         assertThat(response.getUserId()).isEqualTo("user123");
-        assertThat(response.getReason()).contains("denied");
+        assertThat(response.getReason()).isEqualTo("Access denied by rule: delete on transactions");
     }
 
     @Test
     @DisplayName("Valid token + no matching permissions → DENY (default deny)")
     void validToken_noPermissions_returnsDeny() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user456"));
+        mockIdentity("tok", "ext-user456", "user456");
         when(permissionRepository.findByUserIdAndAction("user456", "write"))
-                .thenReturn(List.of()); // no write permissions
+                .thenReturn(List.of());
 
         AuthorizationResponse response = service.authorize(new AuthorizationRequest("tok", "POST", "/transactions"));
 
         assertThat(response.getDecision()).isEqualTo(Decision.DENY);
-        assertThat(response.getReason()).contains("No matching permission");
+        assertThat(response.getReason()).isEqualTo("No matching permission found; default deny applied");
         assertThat(response.getMatchedPermissions()).isEmpty();
     }
 
@@ -122,14 +134,12 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("POST method maps to 'write' action for DB query")
     void postMethod_queriesWithWriteAction() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("u"));
+        mockIdentity("tok", "ext-u", "u");
         when(permissionRepository.findByUserIdAndAction("u", "write"))
                 .thenReturn(List.of());
 
         service.authorize(new AuthorizationRequest("tok", "POST", "/transactions"));
 
-        // Must query with "write", not "POST"
         verify(permissionRepository).findByUserIdAndAction("u", "write");
         verify(permissionRepository, never()).findByUserIdAndAction(anyString(), eq("POST"));
     }
@@ -137,8 +147,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("DELETE method maps to 'delete' action for DB query")
     void deleteMethod_queriesWithDeleteAction() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("u"));
+        mockIdentity("tok", "ext-u", "u");
         when(permissionRepository.findByUserIdAndAction("u", "delete"))
                 .thenReturn(List.of());
 
@@ -152,6 +161,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Expired/invalid token → AuthenticationException propagated")
     void invalidToken_throwsAuthenticationException() {
+        // authenticate() throws before userRepository is reached
         when(jwtAuthenticator.authenticate("bad-token"))
                 .thenThrow(new AuthenticationException("Token has expired"));
 
@@ -165,74 +175,73 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Leading slash in path is normalized before DB query and matching")
     void leadingSlashNormalized_stillMatches() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("u"));
+        mockIdentity("tok", "ext-u", "u");
         when(permissionRepository.findByUserIdAndAction("u", "read"))
-                .thenReturn(List.of(allow("u", "read", "transactions"))); // resource has no leading slash
+                .thenReturn(List.of(allow("u", "read", "transactions")));
 
-        // path has leading slash — must still match after normalization
         AuthorizationResponse response = service.authorize(new AuthorizationRequest("tok", "GET", "/transactions"));
 
         assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
     }
 
-    // ── Full user scenarios ───────────────────────────────────────────────────
+    // ── Assignment document sample scenarios ──────────────────────────────────
 
     @Test
-    @DisplayName("user456: GET /wallets/wallet-789/transactions → ALLOW (explicit 3-segment rule)")
+    @DisplayName("user123: GET /transactions → ALLOW")
+    void user123_read_transactions_allow() {
+        mockIdentity("tok", "ext-user123", "user123");
+        when(permissionRepository.findByUserIdAndAction("user123", "read"))
+                .thenReturn(List.of(
+                        allow("user123", "read", "transactions"),
+                        allow("user123", "read", "accounts")));
+
+        AuthorizationResponse response = service.authorize(new AuthorizationRequest("tok", "GET", "/transactions"));
+
+        assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
+        assertThat(response.getMatchedPermissions().get(0).getResource()).isEqualTo("transactions");
+    }
+
+    @Test
+    @DisplayName("user123: DELETE /transactions/txn-456 → DENY (exact rule does not cover child path)")
+    void user123_deleteTransactionChild_deny() {
+        // Assignment: "Should DENY - user123 explicitly denied delete access"
+        // The deny rule "transactions" is exact; it does NOT match child "transactions/txn-456".
+        // Result is default DENY (matched_permissions is empty).
+        mockIdentity("tok", "ext-user123", "user123");
+        when(permissionRepository.findByUserIdAndAction("user123", "delete"))
+                .thenReturn(List.of(deny("user123", "delete", "transactions")));
+
+        AuthorizationResponse response = service.authorize(
+                new AuthorizationRequest("tok", "DELETE", "/transactions/txn-456"));
+
+        assertThat(response.getDecision()).isEqualTo(Decision.DENY);
+        assertThat(response.getMatchedPermissions()).isEmpty();
+        assertThat(response.getReason()).isEqualTo("No matching permission found; default deny applied");
+    }
+
+    @Test
+    @DisplayName("user456: GET /wallets/wallet-789/transactions → ALLOW (explicit 3-segment rule wins by specificity)")
     void user456_readWalletTransactions_allow() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user456"));
+        // Both "wallets/*" (score 5) and "wallets/wallet-789/transactions" (score 12) match.
+        // The exact match wins by specificity scoring.
+        mockIdentity("tok", "ext-user456", "user456");
         when(permissionRepository.findByUserIdAndAction("user456", "read"))
                 .thenReturn(List.of(
                         allow("user456", "read", "wallets/*"),
-                        allow("user456", "read", "wallets/wallet-789/transactions")
-                ));
+                        allow("user456", "read", "wallets/wallet-789/transactions")));
 
         AuthorizationResponse response = service.authorize(
                 new AuthorizationRequest("tok", "GET", "/wallets/wallet-789/transactions"));
 
         assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
-        // More specific rule should win
         assertThat(response.getMatchedPermissions().get(0).getResource())
                 .isEqualTo("wallets/wallet-789/transactions");
     }
 
     @Test
-    @DisplayName("user456: POST /wallets/wallet-789/transactions → DENY (no write rule for 3-segment path)")
-    void user456_writeWalletTransactions_deny() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user456"));
-        // user456 write permissions: only "wallets/wallet-789" (2 segments)
-        when(permissionRepository.findByUserIdAndAction("user456", "write"))
-                .thenReturn(List.of(allow("user456", "write", "wallets/wallet-789")));
-
-        AuthorizationResponse response = service.authorize(
-                new AuthorizationRequest("tok", "POST", "/wallets/wallet-789/transactions"));
-
-        // "wallets/wallet-789" (2 segments) must NOT match "wallets/wallet-789/transactions" (3 segments)
-        assertThat(response.getDecision()).isEqualTo(Decision.DENY);
-    }
-
-    @Test
-    @DisplayName("admin789: DELETE /accounts/acc-123/settings → ALLOW (global wildcard)")
-    void admin789_deleteDeepPath_allow() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("admin789"));
-        when(permissionRepository.findByUserIdAndAction("admin789", "delete"))
-                .thenReturn(List.of(allow("admin789", "delete", "*")));
-
-        AuthorizationResponse response = service.authorize(
-                new AuthorizationRequest("tok", "DELETE", "/accounts/acc-123/settings"));
-
-        assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
-    }
-
-    @Test
     @DisplayName("user789: POST /wallets/wallet-456/transactions/txn-999 → ALLOW (4-segment wildcard)")
-    void user789_writeDeepWildcard_allow() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user789"));
+    void user789_writeDeepTransaction_allow() {
+        mockIdentity("tok", "ext-user789", "user789");
         when(permissionRepository.findByUserIdAndAction("user789", "write"))
                 .thenReturn(List.of(allow("user789", "write", "wallets/*/transactions/*")));
 
@@ -243,14 +252,74 @@ class AuthorizationServiceImplTest {
     }
 
     @Test
-    @DisplayName("[REGRESSION] user with only wallets/* → GET /wallets/wallet-789/transactions → ALLOW (terminal wildcard)")
-    void terminalWildcard_grantsAccessToNestedPath() {
-        // OLD behaviour: equal-segment check blocked this → DENY
-        // NEW behaviour: terminal '*' inherits to all sub-paths → ALLOW
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("user456"));
+    @DisplayName("user789: POST /wallets/wallet-789/transactions → ALLOW (terminal * absorbs 0 remaining segments)")
+    void user789_writeTransactionsCollection_allow() {
+        // Assignment: "Should ALLOW - user789 can write to any transaction in any wallet"
+        // Pattern "wallets/*/transactions/*" terminal '*' absorbs 0 extra segments here.
+        mockIdentity("tok", "ext-user789", "user789");
+        when(permissionRepository.findByUserIdAndAction("user789", "write"))
+                .thenReturn(List.of(allow("user789", "write", "wallets/*/transactions/*")));
+
+        AuthorizationResponse response = service.authorize(
+                new AuthorizationRequest("tok", "POST", "/wallets/wallet-789/transactions"));
+
+        assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
+    }
+
+    @Test
+    @DisplayName("user456: POST /wallets/wallet-789/transactions → DENY (exact rule no child inheritance)")
+    void user456_writeWalletTransactions_deny() {
+        // Exact rule "wallets/wallet-789" does NOT cover child "wallets/wallet-789/transactions"
+        mockIdentity("tok", "ext-user456", "user456");
+        when(permissionRepository.findByUserIdAndAction("user456", "write"))
+                .thenReturn(List.of(allow("user456", "write", "wallets/wallet-789")));
+
+        AuthorizationResponse response = service.authorize(
+                new AuthorizationRequest("tok", "POST", "/wallets/wallet-789/transactions"));
+
+        assertThat(response.getDecision()).isEqualTo(Decision.DENY);
+        assertThat(response.getMatchedPermissions()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("admin789: DELETE /accounts/acc-123/settings → ALLOW (global wildcard)")
+    void admin789_deleteDeepPath_allow() {
+        mockIdentity("tok", "ext-admin789", "admin789");
+        when(permissionRepository.findByUserIdAndAction("admin789", "delete"))
+                .thenReturn(List.of(allow("admin789", "delete", "*")));
+
+        AuthorizationResponse response = service.authorize(
+                new AuthorizationRequest("tok", "DELETE", "/accounts/acc-123/settings"));
+
+        assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
+        assertThat(response.getMatchedPermissions().get(0).getResource()).isEqualTo("*");
+    }
+
+    @Test
+    @DisplayName("user456: GET /wallets/wallet-999 → ALLOW (wildcard inheritance)")
+    void user456_readUnknownWallet_allow() {
+        // Assignment: "Test wildcard inheritance behavior (implementation dependent)"
+        mockIdentity("tok", "ext-user456", "user456");
         when(permissionRepository.findByUserIdAndAction("user456", "read"))
-                .thenReturn(List.of(allow("user456", "read", "wallets/*")));  // only wildcard, no explicit 3-seg rule
+                .thenReturn(List.of(
+                        allow("user456", "read", "wallets/*"),
+                        allow("user456", "read", "wallets/wallet-789/transactions")));
+
+        AuthorizationResponse response = service.authorize(
+                new AuthorizationRequest("tok", "GET", "/wallets/wallet-999"));
+
+        assertThat(response.getDecision()).isEqualTo(Decision.ALLOW);
+        assertThat(response.getMatchedPermissions().get(0).getResource()).isEqualTo("wallets/*");
+    }
+
+    // ── Regression: terminal wildcard inheritance ─────────────────────────────
+
+    @Test
+    @DisplayName("[REGRESSION] wallets/* alone grants access to nested path via terminal wildcard")
+    void terminalWildcard_grantsAccessToNestedPath() {
+        mockIdentity("tok", "ext-user456", "user456");
+        when(permissionRepository.findByUserIdAndAction("user456", "read"))
+                .thenReturn(List.of(allow("user456", "read", "wallets/*")));
 
         AuthorizationResponse response = service.authorize(
                 new AuthorizationRequest("tok", "GET", "/wallets/wallet-789/transactions"));
@@ -260,14 +329,13 @@ class AuthorizationServiceImplTest {
     }
 
     @Test
-    @DisplayName("[REGRESSION] terminal wildcard permission denies sub-path when explicit deny is more specific")
+    @DisplayName("[REGRESSION] specific deny (score 12) overrides broad wildcard allow (score 5)")
     void terminalWildcardAllow_overriddenByExactDeny_forNestedPath() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("u"));
+        mockIdentity("tok", "ext-u", "u");
         when(permissionRepository.findByUserIdAndAction("u", "read"))
                 .thenReturn(List.of(
-                        allow("u", "read", "wallets/*"),                        // score 3 — broad allow
-                        deny("u", "read", "wallets/wallet-789/transactions")    // score 6 — specific deny wins
+                        allow("u", "read", "wallets/*"),                        // score 5  — broad allow
+                        deny("u", "read", "wallets/wallet-789/transactions")    // score 12 — specific deny wins
                 ));
 
         AuthorizationResponse response = service.authorize(
@@ -281,8 +349,8 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Unknown HTTP method → IllegalArgumentException → 400 response via handler")
     void unknownMethod_throwsIllegalArgument() {
-        when(jwtAuthenticator.authenticate("tok"))
-                .thenReturn(principal("u"));
+        // authenticate + user lookup succeed; method mapping throws before DB query
+        mockIdentity("tok", "ext-u", "u");
 
         assertThatThrownBy(() -> service.authorize(new AuthorizationRequest("tok", "CONNECT", "/transactions")))
                 .isInstanceOf(IllegalArgumentException.class)

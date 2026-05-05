@@ -146,6 +146,7 @@ src/main/java/com/venkatasai/auth/authz_service/
 │
 ├── repository/
 │   ├── PermissionRepository.java
+│   ├── UserRepository.java
 │   └── impl/JdbcPermissionRepository.java
 │
 ├── service/
@@ -332,12 +333,24 @@ CREATE TABLE user_permissions (
     UNIQUE(user_id, action, resource)
 );
 
-CREATE INDEX idx_user_id_action ON user_permissions(user_id, action);
+-- Maps an external IdP user ID (e.g. Clerk's sub claim) to the internal user_id
+-- used in user_permissions. This keeps the permission schema IdP-agnostic.
+CREATE TABLE users (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id          TEXT NOT NULL,     -- internal user ID (used in user_permissions)
+    external_user_id TEXT NOT NULL,     -- IdP user ID extracted from JWT 'sub' claim
+    UNIQUE(external_user_id)
+);
+
+CREATE INDEX idx_user_id_action      ON user_permissions(user_id, action);
+CREATE INDEX idx_user_id_ext_user_id ON users(external_user_id);
 ```
 
-The index on `(user_id, action)` matches the exact query issued at authorization time, so no full-table scan occurs even with large permission sets.
+The index on `(user_id, action)` matches the exact query issued at authorization time, so no full-table scan occurs even with large permission sets. The index on `external_user_id` makes the user-mapping lookup a single key scan.
 
 ### Seeded Test Users
+
+#### Permissions (`user_permissions`)
 
 | User | Action | Resource | Effect |
 |---|---|---|---|
@@ -350,6 +363,19 @@ The index on `(user_id, action)` matches the exact query issued at authorization
 | `user456` | read | `wallets/wallet-789/transactions` | allow |
 | `user789` | write | `wallets/*/transactions/*` | allow |
 | `admin789` | read / write / delete | `*` | allow |
+
+#### Identity Mapping (`users`)
+
+This project uses **[Clerk](https://clerk.com)** to issue JWTs for local testing. Clerk's `sub` claim contains a Clerk-specific user ID. The `users` table maps each Clerk ID to an internal user ID:
+
+| Internal user ID | Clerk external user ID |
+|---|---|
+| `user123` | `user_3DJ8wQ65vmgaH5SogzTltSPhQZF` |
+| `user456` | `user_3DJ90IUzAhSJWgsuPGSJOe9L59T` |
+| `user789` | `user_3DJ938xEXC9cxJE5diLDaX9rWdN` |
+| `admin789` | `user_3DJ95erzmggthgHoQhayVoxfGCw` |
+
+> **Using a different IdP?** The `external_user_id` column stores whatever value your IdP puts in the JWT `sub` claim. To switch providers, simply update the `users` rows to match the `sub` values your IdP issues — no code or permission changes required.
 
 ### Resource Pattern Reference
 
@@ -386,27 +412,34 @@ POST /authorize
       │
       ▼
 3. IDENTITY EXTRACTION  (JwtAuthenticator)
-   • Extract sub claim → userId
+   • Extract sub claim → externalUserId (e.g. Clerk user ID)
    • Extract email claim (optional)
-   → Build UserPrincipal
+   → Build UserPrincipal { externalUserId }
 
       │
       ▼
-4. CONTEXT BUILDING  (AuthorizationMapper)
+4. USER MAPPING  (UserRepository)
+   • SELECT user_id FROM users WHERE external_user_id = ?
+   • Resolves Clerk (or any IdP) sub → internal user_id
+   → Failure (no mapping): AuthenticationException → 401
+
+      │
+      ▼
+5. CONTEXT BUILDING  (AuthorizationMapper)
    • Map HTTP method → action (GET→read, POST→write, etc.)
    • Normalize path (strip leading/trailing slashes)
-   → Build AuthContext { userId, action, path }
+   → Build AuthContext { userId (internal), action, path }
 
       │
       ▼
-5. PERMISSION LOAD  (JdbcPermissionRepository)
+6. PERMISSION LOAD  (JdbcPermissionRepository)
    • SELECT WHERE user_id = ? AND action = ?
    • Result served from Caffeine cache if warm
    → List<Permission>
 
       │
       ▼
-6. POLICY EVALUATION  (PolicyEngine)
+7. POLICY EVALUATION  (PolicyEngine)
    │
    ├── Phase 1: ResourceMatcher
    │   Filter permissions whose resource pattern matches the request path.
@@ -425,7 +458,7 @@ POST /authorize
 
       │
       ▼
-7. RESPONSE
+8. RESPONSE
    • decision: ALLOW | DENY
    • reason: human-readable explanation
    • matched_permissions: the winning rule (empty on default deny)
@@ -442,7 +475,7 @@ POST /authorize
 | Java | 21+ |
 | Maven | 3.9+ |
 
-An internet-accessible OAuth2 / OIDC provider is required for JWT signature verification (JWKS endpoint). For local testing without a real IdP, set `JWT_JWKS_URI` to a locally hosted JWKS and set `JWT_ISSUER` to match.
+An internet-accessible OAuth2 / OIDC provider is required for JWT signature verification (JWKS endpoint). This project is configured for **Clerk** — set `JWT_JWKS_URI` to your Clerk instance's JWKS URL and `JWT_ISSUER` to your Clerk issuer. If you are using a different IdP, point these variables at that provider's endpoints instead and update the `users` table rows to match the `sub` values it issues.
 
 ### Configuration
 

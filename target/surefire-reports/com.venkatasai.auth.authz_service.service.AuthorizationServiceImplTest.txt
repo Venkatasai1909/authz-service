@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: com.venkatasai.auth.authz_service.service.AuthorizationServiceImplTest
 -------------------------------------------------------------------------------
-Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.168 s -- in com.venkatasai.auth.authz_service.service.AuthorizationServiceImplTest
+Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.402 s -- in com.venkatasai.auth.authz_service.service.AuthorizationServiceImplTest

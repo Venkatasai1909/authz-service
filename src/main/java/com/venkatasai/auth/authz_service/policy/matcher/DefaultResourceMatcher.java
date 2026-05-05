@@ -40,10 +40,10 @@ public class DefaultResourceMatcher implements ResourceMatcher {
                 boolean isTerminal = (r == rSegs.length - 1);
 
                 if (isTerminal) {
-                    // Terminal wildcard: absorbs this segment plus all remaining
-                    // path segments.  The while-loop guarantees p < pSegs.length,
-                    // so at least one segment is consumed — prevents matching a
-                    // bare prefix like "wallets/*" vs "wallets".
+                    // Terminal wildcard: absorbs this segment plus all remaining path segments.
+                    // The while-loop guarantees p < pSegs.length here, so at least one segment
+                    // is consumed by this branch. The 0-remaining case (path already exhausted
+                    // when the loop exits) is handled by the check after the loop.
                     log.trace("Terminal wildcard at r={} matched remaining path from p={}", r, p);
                     return true;
                 }
