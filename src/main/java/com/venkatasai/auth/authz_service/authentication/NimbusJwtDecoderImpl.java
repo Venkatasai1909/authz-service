@@ -14,63 +14,64 @@ import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import com.venkatasai.auth.authz_service.exception.AuthenticationException;
 import com.venkatasai.auth.authz_service.model.DecodedToken;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 import java.net.URL;
 import java.util.Map;
 
-public class NimbusJwtDecoderImpl implements JwtDecoder{
+@Slf4j
+@Component
+public class NimbusJwtDecoderImpl implements JwtDecoder {
 
-    private final ConfigurableJWTProcessor<com.nimbusds.jose.proc.SecurityContext> jwtProcessor;
+    private final ConfigurableJWTProcessor<SecurityContext> jwtProcessor;
 
-    public NimbusJwtDecoderImpl(String jwksUrl) {
+    public NimbusJwtDecoderImpl(
+            @Value("${jwt.jwks-uri}") String jwksUrl,
+            @Value("${jwt.algorithm:RS256}") String algorithm) {
         try {
             ResourceRetriever resourceRetriever = new DefaultResourceRetriever(2000, 2000);
-            JWKSource<com.nimbusds.jose.proc.SecurityContext> jwkSource =
-                    new RemoteJWKSet<>(new URL(jwksUrl), resourceRetriever);
+            JWKSource<SecurityContext> jwkSource = new RemoteJWKSet<>(new URL(jwksUrl), resourceRetriever);
 
             this.jwtProcessor = new DefaultJWTProcessor<>();
 
-            JWSKeySelector<com.nimbusds.jose.proc.SecurityContext> keySelector =
-                    new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, jwkSource);
-
+            JWSKeySelector<SecurityContext> keySelector =
+                    new JWSVerificationKeySelector<>(JWSAlgorithm.parse(algorithm), jwkSource);
             jwtProcessor.setJWSKeySelector(keySelector);
 
         } catch (Exception e) {
-            throw new RuntimeException("Failed to initialize JWT decoder", e);
+            throw new RuntimeException("Failed to initialize JWT decoder: " + e.getMessage(), e);
         }
     }
 
     @Override
     public DecodedToken decode(String token) {
         try {
-            SecurityContext ctx = null;
-
-            JWTClaimsSet claims = jwtProcessor.process(token, ctx);
-
-            return mapClaims(claims);
+            JWTClaimsSet claims = jwtProcessor.process(token, null);
+            DecodedToken decoded = mapClaims(claims);
+            log.debug("JWT decoded successfully for subject={}", decoded.getSubject());
+            return decoded;
 
         } catch (BadJWTException e) {
-            e.printStackTrace();
-            throw new AuthenticationException("Invalid JWT");
+            log.warn("JWT claim validation failed: {}", e.getMessage());
+            throw new AuthenticationException("Invalid JWT: " + e.getMessage());
+        } catch (AuthenticationException e) {
+            throw e;
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Unexpected error during JWT processing", e);
             throw new AuthenticationException("JWT processing failed");
         }
     }
 
     private DecodedToken mapClaims(JWTClaimsSet claims) {
-        DecodedToken decoded = new DecodedToken();
-
-        decoded.setSubject(claims.getSubject());
-        decoded.setIssuer(claims.getIssuer());
-
-        if (claims.getExpirationTime() != null) {
-            decoded.setExpiry(claims.getExpirationTime().toInstant());
-        }
-
-        Map<String, Object> claimMap = claims.getClaims();
-        decoded.setClaims(claimMap);
-
-        return decoded;
+        return DecodedToken.builder()
+                .subject(claims.getSubject())
+                .issuer(claims.getIssuer())
+                .expiry(claims.getExpirationTime() != null ? claims.getExpirationTime().toInstant() : null)
+                .notBefore(claims.getNotBeforeTime() != null ? claims.getNotBeforeTime().toInstant() : null)
+                .audience(claims.getAudience() != null && !claims.getAudience().isEmpty() ? claims.getAudience() : null)
+                .claims(Map.copyOf(claims.getClaims()))
+                .build();
     }
 }

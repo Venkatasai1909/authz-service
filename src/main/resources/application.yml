@@ -2,16 +2,22 @@ spring:
   datasource:
     url: jdbc:sqlite:authz.db
     driver-class-name: org.sqlite.JDBC
-
     sql:
       init:
         mode: always
 
-  jpa:
-    database-platform: org.hibernate.dialect.SQLiteDialect
-    hibernate:
-      ddl-auto: none
+jwt:
+  jwks-uri: ${JWT_JWKS_URI:https://your-auth-provider/.well-known/jwks.json}
+  issuer: ${JWT_ISSUER:https://your-auth-provider}
+  audience: ${JWT_AUDIENCE:}
+  algorithm: ${JWT_ALGORITHM:RS256}
+
+cache:
+  permissions:
+    max-size: 1000
+    expire-after-write-minutes: 5
 
 logging:
   level:
     root: INFO
+    com.venkatasai.auth.authz_service: DEBUG

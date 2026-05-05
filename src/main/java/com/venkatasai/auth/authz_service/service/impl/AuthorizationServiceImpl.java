@@ -5,14 +5,21 @@ import com.venkatasai.auth.authz_service.authorization.AuthorizationManager;
 import com.venkatasai.auth.authz_service.dto.request.AuthorizationRequest;
 import com.venkatasai.auth.authz_service.dto.response.AuthorizationResponse;
 import com.venkatasai.auth.authz_service.exception.AuthorizationException;
-import com.venkatasai.auth.authz_service.model.*;
+import com.venkatasai.auth.authz_service.model.AuthContext;
+import com.venkatasai.auth.authz_service.model.AuthorizationResult;
+import com.venkatasai.auth.authz_service.model.Permission;
+import com.venkatasai.auth.authz_service.model.UserPrincipal;
 import com.venkatasai.auth.authz_service.repository.PermissionRepository;
 import com.venkatasai.auth.authz_service.service.AuthorizationService;
+import com.venkatasai.auth.authz_service.util.PathUtils;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Optional;
 
+@Slf4j
+@Service
 @AllArgsConstructor
 public class AuthorizationServiceImpl implements AuthorizationService {
     private final JwtAuthenticationProvider jwtAuthenticationProvider;
@@ -21,24 +28,39 @@ public class AuthorizationServiceImpl implements AuthorizationService {
 
     @Override
     public AuthorizationResponse authorize(AuthorizationRequest request) {
+        log.info("Authorization request: method={} path={}", request.getMethod(), request.getPath());
 
-        Optional<UserPrincipal> userPrincipalOpt = jwtAuthenticationProvider.authenticate(request.getAccessToken());
+        // Step 1: Validate token and extract identity
+        UserPrincipal userPrincipal = jwtAuthenticationProvider.authenticate(request.getAccessToken());
+        log.debug("Authenticated userId={}", userPrincipal.getUserId());
 
-        if(userPrincipalOpt.isEmpty()){
-            throw new AuthorizationException("Invalid access token provided.");
-        }
+        // Step 2: Build auth context (maps method→action, normalizes path)
+        // Must happen before DB query so we query by the correct action ("read"/"write"/"delete")
+        AuthContext authContext = AuthContext.builder()
+                .userId(userPrincipal.getUserId())
+                .action(PathUtils.mapHttpMethodToAction(request.getMethod()))
+                .path(PathUtils.normalizePath(request.getPath()))
+                .build();
+        log.debug("AuthContext: userId={} action={} path={}",
+                authContext.getUserId(), authContext.getAction(), authContext.getPath());
 
-        UserPrincipal userPrincipal = userPrincipalOpt.get();
-        List<Permission> permissions = permissionRepository.findByUserIdAndAction(userPrincipal.getUserId(), request.getMethod());
+        // Step 3: Load permissions for this user + action
+        List<Permission> permissions = permissionRepository.findByUserIdAndAction(
+                authContext.getUserId(), authContext.getAction());
+        log.debug("Loaded {} permission(s) from DB for userId={} action={}",
+                permissions.size(), authContext.getUserId(), authContext.getAction());
 
-        AuthContext authContext = AuthContext.buildAuthContext(userPrincipal, request);
-        AuthorizationResult authorizationResult = authorizationManager.evaluate(authContext, permissions, AuthorizationType.POLICY);
+        // Step 4: Evaluate policy
+        AuthorizationResult authorizationResult = authorizationManager.evaluate(authContext, permissions);
 
-        if(authorizationResult == null){
+        if (authorizationResult == null) {
             throw new AuthorizationException("Authorization result generation failed.");
         }
 
-        return AuthorizationResponse.buildAuthorizationResponse(authorizationResult);
+        log.info("Authorization decision: userId={} action={} path={} decision={}",
+                authContext.getUserId(), authContext.getAction(), authContext.getPath(),
+                authorizationResult.getDecision());
 
+        return AuthorizationResponse.buildAuthorizationResponse(authorizationResult);
     }
 }

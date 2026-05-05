@@ -1,10 +1,11 @@
-CREATE TABLE IF NOT EXISTS permissions (
+CREATE TABLE IF NOT EXISTS user_permissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
-    resource_pattern TEXT NOT NULL,
     action TEXT NOT NULL,
-    effect TEXT NOT NULL
+    resource TEXT NOT NULL,
+    effect TEXT NOT NULL,
+    UNIQUE(user_id, action, resource)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_id_action
-ON permissions(user_id, action);
+ON user_permissions(user_id, action);

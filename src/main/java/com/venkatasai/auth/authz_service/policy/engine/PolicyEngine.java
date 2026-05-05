@@ -3,76 +3,113 @@ package com.venkatasai.auth.authz_service.policy.engine;
 import com.venkatasai.auth.authz_service.model.AuthContext;
 import com.venkatasai.auth.authz_service.model.Decision;
 import com.venkatasai.auth.authz_service.model.Permission;
-import com.venkatasai.auth.authz_service.model.PolicyEngineResult;
 import com.venkatasai.auth.authz_service.policy.matcher.ResourceMatcher;
+import com.venkatasai.auth.authz_service.policy.model.PolicyEngineResult;
 import com.venkatasai.auth.authz_service.policy.model.ScoredPermission;
 import com.venkatasai.auth.authz_service.policy.resolver.ConflictResolver;
 import com.venkatasai.auth.authz_service.policy.scorer.Scorer;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Optional;
 
+@Slf4j
+@Component
+@AllArgsConstructor
 public class PolicyEngine {
+
     private final ResourceMatcher matcher;
-    private final ConflictResolver resolver;
     private final Scorer scorer;
+    private final ConflictResolver resolver;
 
-    public PolicyEngine(ResourceMatcher matcher,
-                        Scorer scorer,
-                        ConflictResolver resolver) {
-        this.matcher = matcher;
-        this.scorer = scorer;
-        this.resolver = resolver;
-    }
+    public PolicyEngineResult evaluate(AuthContext authContext, List<Permission> permissions) {
 
-    public PolicyEngineResult evaluate(AuthContext authContext, List<Permission> permissions){
-        if(authContext == null || permissions == null || permissions.isEmpty()){
+        // ── Guard: no context or no permissions to evaluate ─────────────────
+        if (authContext == null || permissions == null || permissions.isEmpty()) {
+            log.debug("[POLICY] No input to evaluate (authContext={}, permCount={}) → default DENY",
+                    authContext != null ? authContext.getUserId() : "null",
+                    permissions == null ? "null" : 0);
             return PolicyEngineResult.buildDefaultOutput();
         }
 
-        // 1. ResourceMatching
-        List<Permission> resourceMatchingPermissions = permissions.stream()
-                .filter(permission -> matcher.matches(permission.getResource(), authContext.getPath()))
+        log.debug("[POLICY] START  userId={} action={} path={} candidatePermissions={}",
+                authContext.getUserId(), authContext.getAction(),
+                authContext.getPath(), permissions.size());
+
+        // ── Phase 1: Resource matching ───────────────────────────────────────
+        List<Permission> matched = permissions.stream()
+                .filter(p -> {
+                    boolean m = matcher.matches(p.getResource(), authContext.getPath());
+                    log.debug("[MATCH]   resource='{}' effect='{}' → {}",
+                            p.getResource(), p.getEffect(), m ? "MATCH" : "no match");
+                    return m;
+                })
                 .toList();
 
-        // 2. Score for each Permission
-        List<ScoredPermission> scoredPermissions = resourceMatchingPermissions.stream()
-                .map(permission -> new ScoredPermission(permission,
-                        scorer.calculateScore(permission.getResource(), authContext.getPath())))
-                .toList();
+        log.debug("[POLICY] MATCH  {}/{} permission(s) matched path='{}'",
+                matched.size(), permissions.size(), authContext.getPath());
 
-        int topScorer = getTopScoreOfPermissions(scoredPermissions);
-        List<ScoredPermission> topScoredPermissions = scoredPermissions.stream()
-                .filter(scoredPermission -> scoredPermission.score() == topScorer)
-                .toList();
-
-        // 3. Only Single top Scored Permission exists, then just return it
-        if(topScoredPermissions.size() == 1){
-            ScoredPermission topScoredPermission = topScoredPermissions.getFirst();
-            return new PolicyEngineResult(topScoredPermission.permission(), topScoredPermission.permission().getDecision());
+        if (matched.isEmpty()) {
+            log.debug("[POLICY] DECISION  no match → default DENY (userId={} action={} path={})",
+                    authContext.getUserId(), authContext.getAction(), authContext.getPath());
+            return PolicyEngineResult.buildDefaultOutput();
         }
 
-        // 4. There is a conflict between multiple top Scored Permissions
-        Decision decision = resolver.resolve(topScoredPermissions);
-        Optional<ScoredPermission> finalScoredPermission = topScoredPermissions.stream()
-                .filter(scoredPermission -> scoredPermission.permission().getDecision() == decision)
+        // ── Phase 2: Specificity scoring ─────────────────────────────────────
+        List<ScoredPermission> scored = matched.stream()
+                .map(p -> {
+                    int s = scorer.calculateScore(p.getResource(), authContext.getPath());
+                    log.debug("[SCORE]   resource='{}' effect='{}' score={}",
+                            p.getResource(), p.getEffect(), s);
+                    return new ScoredPermission(p, s);
+                })
+                .toList();
+
+        // ── Phase 3: Select the most specific candidates ─────────────────────
+        int topScore = topScore(scored);
+        List<ScoredPermission> topScored = scored.stream()
+                .filter(sp -> sp.score() == topScore)
+                .toList();
+
+        log.debug("[POLICY] TOP    topScore={} candidates={}",
+                topScore, topScored.stream()
+                        .map(sp -> "'" + sp.permission().getResource() + "'[" + sp.permission().getEffect() + "]")
+                        .toList());
+
+        // ── Phase 4a: Single winner ───────────────────────────────────────────
+        if (topScored.size() == 1) {
+            ScoredPermission winner = topScored.getFirst();
+            log.debug("[POLICY] DECISION  single winner resource='{}' effect='{}' → {}",
+                    winner.permission().getResource(),
+                    winner.permission().getEffect(),
+                    winner.permission().getDecision());
+            return new PolicyEngineResult(winner.permission(), winner.permission().getDecision());
+        }
+
+        // ── Phase 4b: Tie → conflict resolver (deny overrides allow) ─────────
+        Decision decision = resolver.resolve(topScored);
+        Optional<ScoredPermission> resolved = topScored.stream()
+                .filter(sp -> sp.permission().getDecision() == decision)
                 .findFirst();
 
-        // 5. Final Scored Permission resolver
-        return finalScoredPermission.map(scoredPermission ->
-                        new PolicyEngineResult(scoredPermission.permission(), decision))
-                .orElseGet(PolicyEngineResult::buildDefaultOutput);
+        log.debug("[POLICY] CONFLICT  {} candidates tied at score={} → resolver decision={}",
+                topScored.size(), topScore, decision);
 
+        log.debug("[POLICY] DECISION  userId={} action={} path='{}' → {}",
+                authContext.getUserId(), authContext.getAction(),
+                authContext.getPath(), decision);
+
+        return resolved
+                .map(sp -> new PolicyEngineResult(sp.permission(), decision))
+                .orElseGet(PolicyEngineResult::buildDefaultOutput);
     }
 
-    private int getTopScoreOfPermissions(List<ScoredPermission> scoredPermissions){
-        if(scoredPermissions == null || scoredPermissions.isEmpty()){
-            return 0;
-        }
-
-        return scoredPermissions.stream()
+    private int topScore(List<ScoredPermission> scored) {
+        return scored.stream()
                 .mapToInt(ScoredPermission::score)
                 .max()
-                .orElse(Integer.MIN_VALUE);
+                .orElse(0);
     }
 }

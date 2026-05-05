@@ -1,52 +1,54 @@
 package com.venkatasai.auth.authz_service.dto.response;
 
-import com.google.gson.annotations.SerializedName;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.venkatasai.auth.authz_service.model.AuthorizationResult;
 import com.venkatasai.auth.authz_service.model.Decision;
+import com.venkatasai.auth.authz_service.model.Permission;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
-@Setter
+import java.util.Collections;
+import java.util.List;
+
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
 public class AuthorizationResponse {
+
     private Decision decision;
 
-    @SerializedName(value = "user_id")
+    @JsonProperty("user_id")
     private String userId;
 
     private String reason;
 
-    @SerializedName(value = "matched_permissions")
-    private MatchedPermissions matchedPermissions;
+    @JsonProperty("matched_permissions")
+    private List<MatchedPermission> matchedPermissions;
 
+    @Getter
     @NoArgsConstructor
     @AllArgsConstructor
-    static class MatchedPermissions{
+    public static class MatchedPermission {
         private String action;
         private String resource;
         private String effect;
     }
 
-    public static AuthorizationResponse buildAuthorizationResponse(AuthorizationResult authorizationResult){
-        AuthorizationResponse authorizationResponse = new AuthorizationResponse();
+    public static AuthorizationResponse buildAuthorizationResponse(AuthorizationResult result) {
+        List<MatchedPermission> permissions = Collections.emptyList();
 
-        if(authorizationResult.getPermission() != null){
-            MatchedPermissions permission  = new MatchedPermissions(authorizationResult.getPermission().getAction(),
-                    authorizationResult.getPermission().getResource(), authorizationResult.getPermission().getEffect());
-
-            authorizationResponse.setMatchedPermissions(permission);
-
+        Permission matched = result.getPermission();
+        if (matched != null) {
+            permissions = List.of(
+                    new MatchedPermission(matched.getAction(), matched.getResource(), matched.getEffect()));
         }
 
-        authorizationResponse.setDecision(authorizationResult.getDecision());
-        authorizationResponse.setUserId(authorizationResponse.getUserId());
-        authorizationResponse.setReason(authorizationResponse.getReason());
-
-        return authorizationResponse;
-
+        return new AuthorizationResponse(
+                result.getDecision(),
+                result.getUserId(),
+                result.getReason(),
+                permissions
+        );
     }
 }
