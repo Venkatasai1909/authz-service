@@ -29,43 +29,45 @@ public class AuthorizationServiceImpl implements AuthorizationService {
 
     @Override
     public AuthorizationResponse authorize(AuthorizationRequest request) {
-        log.info("Authorization request: method={} path={}", request.getMethod(), request.getPath());
+        log.info("Authorization request received: method={} path={}", request.getMethod(), request.getPath());
 
-        // Step 1: Validate token and extract identity
+        // Step 1: Validate the JWT — verify signature, expiry, issuer, and extract the external user identity
+        log.debug("Step 1: Validating JWT and extracting external user identity from 'sub' claim");
         UserPrincipal userPrincipal = jwtAuthenticator.authenticate(request.getAccessToken());
-        log.debug("Authenticated userId={}", userPrincipal.getUserId());
+        log.debug("Step 1 complete: externalUserId={}", userPrincipal.getUserId());
 
-        // Step 2: Map external (Clerk) user → internal user
+        // Step 2: Resolve external IdP user ID (e.g. Clerk's sub) to the internal user ID used in permissions
+        log.debug("Step 2: Resolving externalUserId={} to internal user", userPrincipal.getUserId());
         User user = userRepository.findByExternalUserId(userPrincipal.getUserId())
                 .orElseThrow(() -> new AuthenticationException(
                         "User mapping not found for externalUserId=" + userPrincipal.getUserId()
                 ));
+        log.debug("Step 2 complete: mapped to internalUserId={}", user.getUserId());
 
-        log.debug("Mapped to internal userId={}", user.getUserId());
-
-        // Step 3: Build auth context (maps method→action, normalizes path)
-        // Must happen before DB query so we query by the correct action ("read"/"write"/"delete")
+        // Step 3: Build the auth context — map HTTP method to semantic action and normalize the request path
+        log.debug("Step 3: Building AuthContext — mapping method={} to action and normalizing path={}", request.getMethod(), request.getPath());
         AuthContext authContext = authorizationMapper.mapToAuthContext(
                 user, request.getMethod(), request.getPath());
-        log.debug("AuthContext: userId={} action={} path={}",
+        log.debug("Step 3 complete: AuthContext built — userId={} action={} path={}",
                 authContext.getUserId(), authContext.getAction(), authContext.getPath());
 
-        // Step 4: Load permissions for this user + action
+        // Step 4: Load all permissions for this user and action from the DB (served from cache if warm)
+        log.debug("Step 4: Loading permissions for userId={} action={}", authContext.getUserId(), authContext.getAction());
         List<Permission> permissions = permissionRepository.findByUserIdAndAction(
                 authContext.getUserId(), authContext.getAction());
-        log.debug("Loaded {} permission(s) from DB for userId={} action={}",
-                permissions.size(), authContext.getUserId(), authContext.getAction());
+        log.debug("Step 4 complete: loaded {} permission(s)", permissions.size());
 
-        // Step 4: Evaluate policy
+        // Step 5: Run the policy engine — match resources, score specificity, resolve conflicts
+        log.debug("Step 5: Evaluating policy for userId={} action={} path={}",
+                authContext.getUserId(), authContext.getAction(), authContext.getPath());
         AuthorizationResult authorizationResult = authorizationManager.evaluate(authContext, permissions);
 
         if (authorizationResult == null) {
             throw new AuthorizationException("Authorization result generation failed.");
         }
 
-        log.info("Authorization decision: userId={} action={} path={} decision={}",
-                authContext.getUserId(), authContext.getAction(), authContext.getPath(),
-                authorizationResult.decision());
+        log.info("Step 5 complete: decision={} userId={} action={} path={}",
+                authorizationResult.decision(), authContext.getUserId(), authContext.getAction(), authContext.getPath());
 
         return AuthorizationResponse.buildAuthorizationResponse(authorizationResult);
     }
