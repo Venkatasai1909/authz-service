@@ -4,13 +4,12 @@ import com.venkatasai.auth.authz_service.authentication.JwtAuthenticator;
 import com.venkatasai.auth.authz_service.authorization.AuthorizationManager;
 import com.venkatasai.auth.authz_service.dto.request.AuthorizationRequest;
 import com.venkatasai.auth.authz_service.dto.response.AuthorizationResponse;
+import com.venkatasai.auth.authz_service.exception.AuthenticationException;
 import com.venkatasai.auth.authz_service.exception.AuthorizationException;
 import com.venkatasai.auth.authz_service.mapper.AuthorizationMapper;
-import com.venkatasai.auth.authz_service.model.AuthContext;
-import com.venkatasai.auth.authz_service.model.AuthorizationResult;
-import com.venkatasai.auth.authz_service.model.Permission;
-import com.venkatasai.auth.authz_service.model.UserPrincipal;
+import com.venkatasai.auth.authz_service.model.*;
 import com.venkatasai.auth.authz_service.repository.PermissionRepository;
+import com.venkatasai.auth.authz_service.repository.UserRepository;
 import com.venkatasai.auth.authz_service.service.AuthorizationService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +25,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     private final PermissionRepository permissionRepository;
     private final AuthorizationManager authorizationManager;
     private final AuthorizationMapper authorizationMapper;
+    private final UserRepository userRepository;
 
     @Override
     public AuthorizationResponse authorize(AuthorizationRequest request) {
@@ -35,10 +35,18 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         UserPrincipal userPrincipal = jwtAuthenticator.authenticate(request.getAccessToken());
         log.debug("Authenticated userId={}", userPrincipal.getUserId());
 
+        // Step 2: Map external (Clerk) user → internal user
+        User user = userRepository.findByExternalUserId(userPrincipal.getUserId())
+                .orElseThrow(() -> new AuthenticationException(
+                        "User mapping not found for externalUserId=" + userPrincipal.getUserId()
+                ));
+
+        log.debug("Mapped to internal userId={}", user.getUserId());
+
         // Step 2: Build auth context (maps method→action, normalizes path)
         // Must happen before DB query so we query by the correct action ("read"/"write"/"delete")
         AuthContext authContext = authorizationMapper.mapToAuthContext(
-                userPrincipal, request.getMethod(), request.getPath());
+                user, request.getMethod(), request.getPath());
         log.debug("AuthContext: userId={} action={} path={}",
                 authContext.getUserId(), authContext.getAction(), authContext.getPath());
 

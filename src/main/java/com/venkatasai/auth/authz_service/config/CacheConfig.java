@@ -8,6 +8,7 @@ import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Configuration
@@ -22,7 +23,8 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
-        CaffeineCacheManager manager = new CaffeineCacheManager("permissions");
+        CaffeineCacheManager manager = new CaffeineCacheManager();
+        manager.setCacheNames(List.of("permissions", "users"));
         manager.setCaffeine(Caffeine.newBuilder()
                 .maximumSize(maxSize)
                 .expireAfterWrite(expireAfterWriteMinutes, TimeUnit.MINUTES)

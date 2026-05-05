@@ -5,8 +5,8 @@ import com.venkatasai.auth.authz_service.model.AuthContext;
 import com.venkatasai.auth.authz_service.model.AuthorizationResult;
 import com.venkatasai.auth.authz_service.model.AuthorizationType;
 import com.venkatasai.auth.authz_service.model.Permission;
-import com.venkatasai.auth.authz_service.policy.model.PolicyEngineResult;
 import com.venkatasai.auth.authz_service.policy.engine.PolicyEngine;
+import com.venkatasai.auth.authz_service.policy.model.PolicyEngineResult;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 

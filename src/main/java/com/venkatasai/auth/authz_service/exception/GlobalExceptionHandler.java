@@ -1,6 +1,5 @@
 package com.venkatasai.auth.authz_service.exception;
 
-import com.venkatasai.auth.authz_service.exception.ErrorCode;
 import com.venkatasai.auth.authz_service.dto.response.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
