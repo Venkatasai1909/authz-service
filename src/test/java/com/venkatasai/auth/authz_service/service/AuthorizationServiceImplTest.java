@@ -1,6 +1,7 @@
 package com.venkatasai.auth.authz_service.service;
 
-import com.venkatasai.auth.authz_service.authentication.JwtAuthenticationProvider;
+import com.venkatasai.auth.authz_service.authentication.JwtAuthenticator;
+import com.venkatasai.auth.authz_service.mapper.AuthorizationMapper;
 import com.venkatasai.auth.authz_service.authorization.AuthorizationManager;
 import com.venkatasai.auth.authz_service.authorization.factory.AuthorizationFactory;
 import com.venkatasai.auth.authz_service.authorization.strategy.PolicyEngineStrategy;
@@ -32,7 +33,7 @@ import static org.mockito.Mockito.*;
 class AuthorizationServiceImplTest {
 
     @Mock
-    private JwtAuthenticationProvider jwtAuthenticationProvider;
+    private JwtAuthenticator jwtAuthenticator;
 
     @Mock
     private PermissionRepository permissionRepository;
@@ -51,7 +52,7 @@ class AuthorizationServiceImplTest {
         AuthorizationFactory factory = new AuthorizationFactory(List.of(strategy));
         AuthorizationManager manager = new AuthorizationManager(factory);
 
-        service = new AuthorizationServiceImpl(jwtAuthenticationProvider, permissionRepository, manager);
+        service = new AuthorizationServiceImpl(jwtAuthenticator, permissionRepository, manager, new AuthorizationMapper());
     }
 
     private UserPrincipal principal(String userId) {
@@ -71,7 +72,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Valid token + matching allow permission → ALLOW response")
     void validToken_allowPermission_returnsAllow() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user123"));
         when(permissionRepository.findByUserIdAndAction("user123", "read"))
                 .thenReturn(List.of(allow("user123", "read", "transactions")));
@@ -87,7 +88,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Valid token + explicit deny rule → DENY response")
     void validToken_denyPermission_returnsDeny() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user123"));
         when(permissionRepository.findByUserIdAndAction("user123", "delete"))
                 .thenReturn(List.of(deny("user123", "delete", "transactions")));
@@ -102,7 +103,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Valid token + no matching permissions → DENY (default deny)")
     void validToken_noPermissions_returnsDeny() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user456"));
         when(permissionRepository.findByUserIdAndAction("user456", "write"))
                 .thenReturn(List.of()); // no write permissions
@@ -119,7 +120,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("POST method maps to 'write' action for DB query")
     void postMethod_queriesWithWriteAction() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("u"));
         when(permissionRepository.findByUserIdAndAction("u", "write"))
                 .thenReturn(List.of());
@@ -134,7 +135,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("DELETE method maps to 'delete' action for DB query")
     void deleteMethod_queriesWithDeleteAction() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("u"));
         when(permissionRepository.findByUserIdAndAction("u", "delete"))
                 .thenReturn(List.of());
@@ -149,7 +150,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Expired/invalid token → AuthenticationException propagated")
     void invalidToken_throwsAuthenticationException() {
-        when(jwtAuthenticationProvider.authenticate("bad-token"))
+        when(jwtAuthenticator.authenticate("bad-token"))
                 .thenThrow(new AuthenticationException("Token has expired"));
 
         assertThatThrownBy(() -> service.authorize(new AuthorizationRequest("bad-token", "GET", "/transactions")))
@@ -162,7 +163,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Leading slash in path is normalized before DB query and matching")
     void leadingSlashNormalized_stillMatches() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("u"));
         when(permissionRepository.findByUserIdAndAction("u", "read"))
                 .thenReturn(List.of(allow("u", "read", "transactions"))); // resource has no leading slash
@@ -178,7 +179,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("user456: GET /wallets/wallet-789/transactions → ALLOW (explicit 3-segment rule)")
     void user456_readWalletTransactions_allow() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user456"));
         when(permissionRepository.findByUserIdAndAction("user456", "read"))
                 .thenReturn(List.of(
@@ -198,7 +199,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("user456: POST /wallets/wallet-789/transactions → DENY (no write rule for 3-segment path)")
     void user456_writeWalletTransactions_deny() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user456"));
         // user456 write permissions: only "wallets/wallet-789" (2 segments)
         when(permissionRepository.findByUserIdAndAction("user456", "write"))
@@ -214,7 +215,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("admin789: DELETE /accounts/acc-123/settings → ALLOW (global wildcard)")
     void admin789_deleteDeepPath_allow() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("admin789"));
         when(permissionRepository.findByUserIdAndAction("admin789", "delete"))
                 .thenReturn(List.of(allow("admin789", "delete", "*")));
@@ -228,7 +229,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("user789: POST /wallets/wallet-456/transactions/txn-999 → ALLOW (4-segment wildcard)")
     void user789_writeDeepWildcard_allow() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user789"));
         when(permissionRepository.findByUserIdAndAction("user789", "write"))
                 .thenReturn(List.of(allow("user789", "write", "wallets/*/transactions/*")));
@@ -244,7 +245,7 @@ class AuthorizationServiceImplTest {
     void terminalWildcard_grantsAccessToNestedPath() {
         // OLD behaviour: equal-segment check blocked this → DENY
         // NEW behaviour: terminal '*' inherits to all sub-paths → ALLOW
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("user456"));
         when(permissionRepository.findByUserIdAndAction("user456", "read"))
                 .thenReturn(List.of(allow("user456", "read", "wallets/*")));  // only wildcard, no explicit 3-seg rule
@@ -259,7 +260,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("[REGRESSION] terminal wildcard permission denies sub-path when explicit deny is more specific")
     void terminalWildcardAllow_overriddenByExactDeny_forNestedPath() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("u"));
         when(permissionRepository.findByUserIdAndAction("u", "read"))
                 .thenReturn(List.of(
@@ -278,7 +279,7 @@ class AuthorizationServiceImplTest {
     @Test
     @DisplayName("Unknown HTTP method → IllegalArgumentException → 400 response via handler")
     void unknownMethod_throwsIllegalArgument() {
-        when(jwtAuthenticationProvider.authenticate("tok"))
+        when(jwtAuthenticator.authenticate("tok"))
                 .thenReturn(principal("u"));
 
         assertThatThrownBy(() -> service.authorize(new AuthorizationRequest("tok", "CONNECT", "/transactions")))

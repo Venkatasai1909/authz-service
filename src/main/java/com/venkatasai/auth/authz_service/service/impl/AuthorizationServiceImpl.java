@@ -1,17 +1,17 @@
 package com.venkatasai.auth.authz_service.service.impl;
 
-import com.venkatasai.auth.authz_service.authentication.JwtAuthenticationProvider;
+import com.venkatasai.auth.authz_service.authentication.JwtAuthenticator;
 import com.venkatasai.auth.authz_service.authorization.AuthorizationManager;
 import com.venkatasai.auth.authz_service.dto.request.AuthorizationRequest;
 import com.venkatasai.auth.authz_service.dto.response.AuthorizationResponse;
 import com.venkatasai.auth.authz_service.exception.AuthorizationException;
+import com.venkatasai.auth.authz_service.mapper.AuthorizationMapper;
 import com.venkatasai.auth.authz_service.model.AuthContext;
 import com.venkatasai.auth.authz_service.model.AuthorizationResult;
 import com.venkatasai.auth.authz_service.model.Permission;
 import com.venkatasai.auth.authz_service.model.UserPrincipal;
 import com.venkatasai.auth.authz_service.repository.PermissionRepository;
 import com.venkatasai.auth.authz_service.service.AuthorizationService;
-import com.venkatasai.auth.authz_service.util.PathUtils;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -22,25 +22,23 @@ import java.util.List;
 @Service
 @AllArgsConstructor
 public class AuthorizationServiceImpl implements AuthorizationService {
-    private final JwtAuthenticationProvider jwtAuthenticationProvider;
+    private final JwtAuthenticator jwtAuthenticator;
     private final PermissionRepository permissionRepository;
     private final AuthorizationManager authorizationManager;
+    private final AuthorizationMapper authorizationMapper;
 
     @Override
     public AuthorizationResponse authorize(AuthorizationRequest request) {
         log.info("Authorization request: method={} path={}", request.getMethod(), request.getPath());
 
         // Step 1: Validate token and extract identity
-        UserPrincipal userPrincipal = jwtAuthenticationProvider.authenticate(request.getAccessToken());
+        UserPrincipal userPrincipal = jwtAuthenticator.authenticate(request.getAccessToken());
         log.debug("Authenticated userId={}", userPrincipal.getUserId());
 
         // Step 2: Build auth context (maps method→action, normalizes path)
         // Must happen before DB query so we query by the correct action ("read"/"write"/"delete")
-        AuthContext authContext = AuthContext.builder()
-                .userId(userPrincipal.getUserId())
-                .action(PathUtils.mapHttpMethodToAction(request.getMethod()))
-                .path(PathUtils.normalizePath(request.getPath()))
-                .build();
+        AuthContext authContext = authorizationMapper.mapToAuthContext(
+                userPrincipal, request.getMethod(), request.getPath());
         log.debug("AuthContext: userId={} action={} path={}",
                 authContext.getUserId(), authContext.getAction(), authContext.getPath());
 

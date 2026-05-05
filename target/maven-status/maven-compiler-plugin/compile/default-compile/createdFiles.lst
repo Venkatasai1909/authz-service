@@ -24,7 +24,6 @@ com/venkatasai/auth/authz_service/authentication/JwtDecoder.class
 com/venkatasai/auth/authz_service/authorization/strategy/PolicyEngineStrategy.class
 com/venkatasai/auth/authz_service/model/Permission$PermissionBuilder.class
 com/venkatasai/auth/authz_service/policy/scorer/SpecificityScorer.class
-com/venkatasai/auth/authz_service/authentication/JwtAuthenticationProvider.class
 com/venkatasai/auth/authz_service/dto/response/AuthorizationResponse.class
 com/venkatasai/auth/authz_service/exception/GlobalExceptionHandler.class
 com/venkatasai/auth/authz_service/util/PathUtils.class
@@ -33,6 +32,8 @@ com/venkatasai/auth/authz_service/policy/engine/PolicyEngine.class
 com/venkatasai/auth/authz_service/policy/model/PolicyEngineResult.class
 com/venkatasai/auth/authz_service/model/UserPrincipal$UserPrincipalBuilder.class
 com/venkatasai/auth/authz_service/model/AuthContext.class
+com/venkatasai/auth/authz_service/authentication/JwtAuthenticator.class
+com/venkatasai/auth/authz_service/mapper/AuthorizationMapper.class
 com/venkatasai/auth/authz_service/model/UserPrincipal.class
 com/venkatasai/auth/authz_service/exception/AuthenticationException.class
 com/venkatasai/auth/authz_service/policy/matcher/ResourceMatcher.class

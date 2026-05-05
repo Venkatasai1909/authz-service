@@ -12,7 +12,7 @@ import java.util.Map;
 @Slf4j
 @Component
 @AllArgsConstructor
-public class JwtAuthenticationProvider {
+public class JwtAuthenticator {
     private final TokenValidator tokenValidator;
 
     public UserPrincipal authenticate(String token) {

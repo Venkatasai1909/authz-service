@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.cache.CacheManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
@@ -34,6 +35,9 @@ class PermissionCacheTest {
     @Autowired
     private PermissionRepository permissionRepository;
 
+    @Autowired
+    private CacheManager cacheManager;
+
     private final List<Permission> readPermissions = List.of(
             Permission.builder().id(1).userId("user123").action("read").resource("transactions").effect("allow").build()
     );
@@ -41,6 +45,7 @@ class PermissionCacheTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
+        cacheManager.getCache("permissions").clear();
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("user123"), eq("read")))
                 .thenReturn(readPermissions);
     }

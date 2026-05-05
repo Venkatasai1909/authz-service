@@ -13,8 +13,8 @@
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/authentication/NimbusJwtDecoderImpl.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/policy/resolver/DenyOverridesResolver.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/authorization/factory/AuthorizationFactory.java
-/Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/authentication/JwtAuthenticationProvider.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/policy/model/PolicyEngineResult.java
+/Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/authentication/JwtAuthenticator.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/policy/matcher/DefaultResourceMatcher.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/authentication/TokenValidator.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/model/Permission.java
@@ -36,5 +36,6 @@
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/service/AuthorizationService.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/model/UserPrincipal.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/util/PathUtils.java
+/Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/mapper/AuthorizationMapper.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/model/Decision.java
 /Users/venkatasaikanchi/Downloads/authz-service/src/main/java/com/venkatasai/auth/authz_service/policy/matcher/ResourceMatcher.java
