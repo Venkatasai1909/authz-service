@@ -38,16 +38,16 @@ public class AuthorizationResponse {
     public static AuthorizationResponse buildAuthorizationResponse(AuthorizationResult result) {
         List<MatchedPermission> permissions = Collections.emptyList();
 
-        Permission matched = result.getPermission();
+        Permission matched = result.permission();
         if (matched != null) {
             permissions = List.of(
                     new MatchedPermission(matched.getAction(), matched.getResource(), matched.getEffect()));
         }
 
         return new AuthorizationResponse(
-                result.getDecision(),
-                result.getUserId(),
-                result.getReason(),
+                result.decision(),
+                result.userId(),
+                result.reason(),
                 permissions
         );
     }

@@ -80,6 +80,14 @@ public class SpecificityScorer implements Scorer {
             p++;
         }
 
+        // ── Special case: path exhausted exactly at terminal wildcard position ────
+        // Mirrors the 0-remaining match added in DefaultResourceMatcher.
+        // Score the terminal '*' at its position weight so ranking stays consistent.
+        if (r == rSegs.length - 1 && "*".equals(rSegs[r]) && p == pSegs.length) {
+            score += (n - r); // wildcard contribution at this position
+            consumedByTerminalWildcard = true;
+        }
+
         // Terminal wildcard: broke early — valid by definition.
         // Otherwise: both arrays must be fully consumed (exact-depth match).
         if (!consumedByTerminalWildcard && (r != rSegs.length || p != pSegs.length)) {

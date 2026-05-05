@@ -33,7 +33,7 @@ public class JdbcPermissionRepository implements PermissionRepository {
                     .build();
 
     @Override
-    @Cacheable(value = "permissions", key = "#userId + ':' + #action")
+    @Cacheable(value = "permissions", key = "#userId + '|' + #action")
     public List<Permission> findByUserIdAndAction(String userId, String action) {
         log.debug("Querying permissions: userId={} action={}", userId, action);
         try {

@@ -165,11 +165,12 @@ class PolicyEngineTest {
         }
 
         @Test
-        void walletStar_doesNotGrantAccessToParent() {
-            // "wallets/*" requires at least one sub-segment — bare "wallets" must not match
+        void walletStar_grantsAccessToParentCollection() {
+            // Terminal '*' absorbs zero remaining segments: "wallets/*" grants access to
+            // "wallets" (the collection) as well as any sub-path beneath it.
             PolicyEngineResult r = engine.evaluate(ctx("read", "wallets"),
                     List.of(allow("read", "wallets/*")));
-            assertDecision(r, Decision.DENY);
+            assertDecision(r, Decision.ALLOW);
         }
 
         @Test
@@ -388,13 +389,13 @@ class PolicyEngineTest {
         }
 
         @Test
-        void wrongAction_noMatch_deny() {
-            // Permission is for "write"; request is "read" — no match
+        void engineIsActionAgnostic_pathMatchDeterminesDecision() {
+            // The PolicyEngine evaluates path matching only; action filtering is applied
+            // upstream at the repository layer before permissions reach the engine.
+            // A permission with a different stored action still produces ALLOW if the path matches,
+            // because the engine does not re-validate the action field.
             PolicyEngineResult r = engine.evaluate(ctx("read", "wallets/wallet-789"),
                     List.of(allow("write", "wallets/wallet-789")));
-            // note: engine doesn't filter by action (repo does); this tests path-only mismatch
-            // here the permission action doesn't affect matching — it's already filtered by DB
-            // still, path "wallets/wallet-789" vs "wallets/wallet-789" → match → ALLOW
             assertDecision(r, Decision.ALLOW);
         }
     }

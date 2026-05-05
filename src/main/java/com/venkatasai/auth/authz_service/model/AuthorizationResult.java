@@ -1,19 +1,10 @@
 package com.venkatasai.auth.authz_service.model;
 
 import com.venkatasai.auth.authz_service.policy.model.PolicyEngineResult;
-import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Getter;
 
-@Getter
 @Builder
-@AllArgsConstructor
-public class AuthorizationResult {
-    private final String userId;
-    private final Permission permission;
-    private final Decision decision;
-    private final String reason;
-
+public record AuthorizationResult(String userId, Permission permission, Decision decision, String reason) {
     public static AuthorizationResult buildAuthorizationResult(PolicyEngineResult policyEngineResult, String userId) {
         return AuthorizationResult.builder()
                 .userId(userId)
@@ -28,7 +19,7 @@ public class AuthorizationResult {
             return "No matching permission found; default deny applied";
         }
         if (decision == Decision.ALLOW) {
-            return String.format("Access granted by rule: %s on %s",
+            return String.format("User has %s permission for %s",
                     permission.getAction(), permission.getResource());
         }
         return String.format("Access denied by rule: %s on %s",

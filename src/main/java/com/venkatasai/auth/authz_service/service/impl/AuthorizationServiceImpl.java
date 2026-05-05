@@ -57,7 +57,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
 
         log.info("Authorization decision: userId={} action={} path={} decision={}",
                 authContext.getUserId(), authContext.getAction(), authContext.getPath(),
-                authorizationResult.getDecision());
+                authorizationResult.decision());
 
         return AuthorizationResponse.buildAuthorizationResponse(authorizationResult);
     }

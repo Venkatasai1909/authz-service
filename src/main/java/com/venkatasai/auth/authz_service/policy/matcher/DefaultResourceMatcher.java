@@ -64,6 +64,15 @@ public class DefaultResourceMatcher implements ResourceMatcher {
             p++;
         }
 
+        // ── Special case: path exhausted exactly at terminal wildcard position ────
+        // Handles patterns like "wallets/*/transactions/*" matching "wallets/wallet-789/transactions"
+        // where the terminal '*' absorbs zero remaining path segments.
+        // Note: "wallets/*" also matches "wallets" (the collection itself) under this rule.
+        if (r == rSegs.length - 1 && "*".equals(rSegs[r]) && p == pSegs.length) {
+            log.trace("Terminal wildcard at r={} matched empty remainder (0-remaining)", r);
+            return true;
+        }
+
         // Both arrays must be fully consumed for an exact match.
         // If one is exhausted before the other it is either:
         //   - pattern shorter than path (literal overshoot) → false

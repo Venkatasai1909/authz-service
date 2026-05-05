@@ -128,9 +128,11 @@ class DefaultResourceMatcherTest {
         }
 
         @Test
-        void terminalWildcard_doesNotMatchParent() {
-            // "wallets/*" requires at least one sub-segment; bare "wallets" does not qualify
-            assertThat(matcher.matches("wallets/*", "wallets")).isFalse();
+        void terminalWildcard_matchesParentCollection() {
+            // Terminal '*' absorbs zero remaining segments: "wallets/*" also matches "wallets"
+            // (the collection itself). This is consistent with "wallets/*/transactions/*"
+            // matching "wallets/wallet-789/transactions" (terminal '*' absorbs 0 segments).
+            assertThat(matcher.matches("wallets/*", "wallets")).isTrue();
         }
 
         @Test
