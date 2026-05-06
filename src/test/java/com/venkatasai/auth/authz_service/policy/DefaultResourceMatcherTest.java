@@ -104,21 +104,15 @@ class DefaultResourceMatcherTest {
     @DisplayName("Terminal '*': hierarchical inheritance (CRITICAL)")
     class TerminalWildcard {
 
-        // ── These two tests FAILED in the old equal-segment implementation ──
-
         @Test
-        @DisplayName("[REGRESSION] wallets/* matches wallets/wallet-123/transactions — OLD CODE RETURNED FALSE")
+        @DisplayName("wallets/* matches wallets/wallet-123/transactions")
         void terminalWildcard_matchesDirectChild_andNestedChild() {
-            // Old code: resourceSegments.length(2) != pathSegments.length(3) → false
-            // New code: terminal '*' absorbs all remaining segments → true
             assertThat(matcher.matches("wallets/*", "wallets/wallet-123/transactions")).isTrue();
         }
 
         @Test
-        @DisplayName("[REGRESSION] wallets/* matches deeply nested path — OLD CODE RETURNED FALSE")
+        @DisplayName("wallets/* matches deeply nested path")
         void terminalWildcard_matchesDeepNesting() {
-            // Old code: 2 != 4 → false
-            // New code: terminal '*' absorbs remaining → true
             assertThat(matcher.matches("wallets/*", "wallets/wallet-123/transactions/txn-456")).isTrue();
         }
 
@@ -172,6 +166,11 @@ class DefaultResourceMatcherTest {
         void nonTerminalWildcard_matchesDifferentWalletId() {
             assertThat(matcher.matches("wallets/*/transactions", "wallets/wallet-999/transactions")).isTrue();
         }
+
+        @Test
+        void nonTerminalWildcard_matchesDifferentWalletIdAndTransactionId() {
+            assertThat(matcher.matches("wallets/*/transactions/*", "wallets/wallet-999/transactions/txn-909")).isTrue();
+        }
     }
 
     // ── Mixed (non-terminal + terminal) wildcard ──────────────────────────────
@@ -186,10 +185,8 @@ class DefaultResourceMatcherTest {
         }
 
         @Test
-        @DisplayName("[REGRESSION] Terminal '*' in 4-seg pattern absorbs 5th segment — OLD CODE RETURNED FALSE")
+        @DisplayName("Terminal '*' in 4-seg pattern absorbs 5th segment")
         void terminalWildcardInFourSegPattern_matchesFiveSegPath() {
-            // Old code: 4 != 5 → false
-            // New code: terminal '*' absorbs 5th segment → true
             assertThat(matcher.matches("wallets/*/transactions/*", "wallets/wallet-456/transactions/txn-999/details")).isTrue();
         }
 

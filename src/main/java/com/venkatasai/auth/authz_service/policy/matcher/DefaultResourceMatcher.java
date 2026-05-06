@@ -14,62 +14,57 @@ public class DefaultResourceMatcher implements ResourceMatcher {
             return false;
         }
 
-        String normResource = PathUtils.normalizePath(resource);
-        String normPath     = PathUtils.normalizePath(path);
-
-        // Empty path after normalization: only the global wildcard matches
-        if (normPath.isEmpty()) {
-            return "*".equals(normResource);
-        }
+        String normalizedResource = PathUtils.normalizePath(resource);
+        String normalizedPath     = PathUtils.normalizePath(path);
 
         // Global wildcard matches any path at any depth
-        if ("*".equals(normResource)) {
+        if ("*".equals(normalizedResource)) {
             return true;
         }
 
-        String[] rSegs = normResource.split("/");
-        String[] pSegs = normPath.split("/");
+        String[] resourceSegments = normalizedResource.split("/");
+        String[] pathSegments     = normalizedPath.split("/");
 
-        int r = 0;
-        int p = 0;
+        int resourceIndex = 0;
+        int pathIndex     = 0;
 
-        while (r < rSegs.length && p < pSegs.length) {
-            String rSeg = rSegs[r];
+        while (resourceIndex < resourceSegments.length && pathIndex < pathSegments.length) {
+            String resourceSegment = resourceSegments[resourceIndex];
 
-            if ("*".equals(rSeg)) {
-                boolean isTerminal = (r == rSegs.length - 1);
+            if ("*".equals(resourceSegment)) {
+                boolean isTerminal = (resourceIndex == resourceSegments.length - 1);
 
                 if (isTerminal) {
                     // Terminal wildcard: absorbs this segment plus all remaining path segments.
-                    // The while-loop guarantees p < pSegs.length here, so at least one segment
+                    // The while-loop guarantees pathIndex < pathSegments.length here, so at least one segment
                     // is consumed by this branch. The 0-remaining case (path already exhausted
                     // when the loop exits) is handled by the check after the loop.
-                    log.trace("Terminal wildcard at r={} matched remaining path from p={}", r, p);
+                    log.trace("Terminal wildcard at resourceIndex={} matched remaining path from pathIndex={}", resourceIndex, pathIndex);
                     return true;
                 }
 
                 // Non-terminal wildcard: consume exactly one path segment
-                r++;
-                p++;
+                resourceIndex++;
+                pathIndex++;
                 continue;
             }
 
             // Literal segment: must match exactly
-            if (!rSeg.equals(pSegs[p])) {
-                log.trace("Segment mismatch at r={}: expected='{}' got='{}'", r, rSeg, pSegs[p]);
+            if (!resourceSegment.equals(pathSegments[pathIndex])) {
+                log.trace("Segment mismatch at resourceIndex={}: expected='{}' got='{}'", resourceIndex, resourceSegment, pathSegments[pathIndex]);
                 return false;
             }
 
-            r++;
-            p++;
+            resourceIndex++;
+            pathIndex++;
         }
 
         // ── Special case: path exhausted exactly at terminal wildcard position ────
         // Handles patterns like "wallets/*/transactions/*" matching "wallets/wallet-789/transactions"
         // where the terminal '*' absorbs zero remaining path segments.
         // Note: "wallets/*" also matches "wallets" (the collection itself) under this rule.
-        if (r == rSegs.length - 1 && "*".equals(rSegs[r]) && p == pSegs.length) {
-            log.trace("Terminal wildcard at r={} matched empty remainder (0-remaining)", r);
+        if (resourceIndex == resourceSegments.length - 1 && "*".equals(resourceSegments[resourceIndex]) && pathIndex == pathSegments.length) {
+            log.trace("Terminal wildcard at resourceIndex={} matched empty remainder (0-remaining)", resourceIndex);
             return true;
         }
 
@@ -77,8 +72,8 @@ public class DefaultResourceMatcher implements ResourceMatcher {
         // If one is exhausted before the other it is either:
         //   - pattern shorter than path (literal overshoot) → false
         //   - pattern longer than path (path too short)     → false
-        boolean matched = (r == rSegs.length && p == pSegs.length);
-        log.trace("Exact-length check: rExhausted={} pExhausted={} matched={}", r == rSegs.length, p == pSegs.length, matched);
+        boolean matched = (resourceIndex == resourceSegments.length && pathIndex == pathSegments.length);
+        log.trace("Exact-length check: resourceExhausted={} pathExhausted={} matched={}", resourceIndex == resourceSegments.length, pathIndex == pathSegments.length, matched);
         return matched;
     }
 

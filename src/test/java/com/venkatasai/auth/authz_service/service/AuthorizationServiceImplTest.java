@@ -159,6 +159,19 @@ class AuthorizationServiceImplTest {
     // ── Token validation failures ─────────────────────────────────────────────
 
     @Test
+    @DisplayName("Valid token but no Users table entry for externalUserId → AuthenticationException")
+    void unknownExternalUser_throwsAuthenticationException() {
+        when(jwtAuthenticator.authenticate("tok"))
+                .thenReturn(UserPrincipal.builder().userId("ext-unknown").build());
+        when(userRepository.findByExternalUserId("ext-unknown"))
+                .thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> service.authorize(new AuthorizationRequest("tok", "GET", "/transactions")))
+                .isInstanceOf(AuthenticationException.class)
+                .hasMessageContaining("User mapping not found");
+    }
+
+    @Test
     @DisplayName("Expired/invalid token → AuthenticationException propagated")
     void invalidToken_throwsAuthenticationException() {
         // authenticate() throws before userRepository is reached
@@ -315,7 +328,7 @@ class AuthorizationServiceImplTest {
     // ── Regression: terminal wildcard inheritance ─────────────────────────────
 
     @Test
-    @DisplayName("[REGRESSION] wallets/* alone grants access to nested path via terminal wildcard")
+    @DisplayName("wallets/* alone grants access to nested path via terminal wildcard")
     void terminalWildcard_grantsAccessToNestedPath() {
         mockIdentity("tok", "ext-user456", "user456");
         when(permissionRepository.findByUserIdAndAction("user456", "read"))
@@ -329,7 +342,7 @@ class AuthorizationServiceImplTest {
     }
 
     @Test
-    @DisplayName("[REGRESSION] specific deny (score 12) overrides broad wildcard allow (score 5)")
+    @DisplayName("specific deny (score 12) overrides broad wildcard allow (score 5)")
     void terminalWildcardAllow_overriddenByExactDeny_forNestedPath() {
         mockIdentity("tok", "ext-u", "u");
         when(permissionRepository.findByUserIdAndAction("u", "read"))

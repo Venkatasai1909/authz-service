@@ -145,20 +145,16 @@ class PolicyEngineTest {
     class NestedInheritance {
 
         @Test
-        @DisplayName("[REGRESSION] wallets/* grants access to wallets/wallet-123/transactions — OLD CODE: DENY")
+        @DisplayName("wallets/* grants access to wallets/wallet-123/transactions")
         void walletStarMatchesTransactionChild() {
-            // Old code: resourceSegments.length(2) != pathSegments.length(3) → no match → DENY
-            // New code: terminal '*' absorbs remaining → ALLOW
             PolicyEngineResult r = engine.evaluate(ctx("read", "wallets/wallet-123/transactions"),
                     List.of(allow("read", "wallets/*")));
             assertDecision(r, Decision.ALLOW);
         }
 
         @Test
-        @DisplayName("[REGRESSION] wallets/* grants access to 4-segment nested path — OLD CODE: DENY")
+        @DisplayName("wallets/* grants access to 4-segment nested path")
         void walletStarMatchesDeepNestedPath() {
-            // Old code: 2 != 4 → no match → DENY
-            // New code: terminal '*' → ALLOW
             PolicyEngineResult r = engine.evaluate(ctx("read", "wallets/wallet-123/transactions/txn-456"),
                     List.of(allow("read", "wallets/*")));
             assertDecision(r, Decision.ALLOW);
@@ -277,10 +273,8 @@ class PolicyEngineTest {
         }
 
         @Test
-        @DisplayName("[REGRESSION] wallets/w1/*(11) beats wallets/*/transactions(10) — literal prefix wins tie")
+        @DisplayName("wallets/w1/*(11) beats wallets/*/transactions(10) — literal prefix wins tie")
         void literalPrefixWildcard_beatsWildcardMiddle_tieBreaking() {
-            // OLD ALGORITHM BUG: both scored 5 (flat weighting) — tie resolved by deny-override, wrong winner.
-            // NEW: position-weighted scoring gives 11 vs 10 — literal prefix always outranks wildcard prefix.
             List<Permission> perms = List.of(
                     deny("read", "wallets/*/transactions"),   // score 10 — wildcard at position 1
                     allow("read", "wallets/w1/*")             // score 11 — wildcard at position 2 — wins
