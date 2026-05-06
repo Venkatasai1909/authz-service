@@ -38,7 +38,7 @@ The design is intentionally decoupled: token validation, permission storage, and
 - **Specificity Scoring** — position-weighted scoring ensures the most specific rule always wins over broader wildcards
 - **Deny Overrides** — when rules of equal specificity conflict, DENY always wins
 - **Default Deny** — any request without a matching permission is denied; access must be explicitly granted
-- **Caffeine Cache** — permission lookups are cached per `(userId, action)` with configurable TTL and size
+- **Caffeine Cache** — permission lookups are cached per `(userId, action)` and user identity lookups are cached per `externalUserId`, both with configurable TTL and size
 - **Strategy Pattern** — authorization logic is pluggable; additional strategies (RBAC, ABAC) can be registered without modifying existing code
 - **Structured Error Responses** — typed error codes and machine-readable error payloads for all failure modes
 - **Input Validation** — all request fields validated via Bean Validation before processing
@@ -147,7 +147,9 @@ src/main/java/com/venkatasai/auth/authz_service/
 ├── repository/
 │   ├── PermissionRepository.java
 │   ├── UserRepository.java
-│   └── impl/JdbcPermissionRepository.java
+│   └── impl/
+│       ├── JdbcPermissionRepository.java
+│       └── JdbcUserRepository.java
 │
 ├── service/
 │   ├── AuthorizationService.java
@@ -190,16 +192,16 @@ The `PolicyEngine` is a pure, stateless component with no Spring dependencies in
 After matching, every candidate rule is scored. The scoring formula is position-weighted to ensure rules that match earlier segments more precisely score higher:
 
 ```
-Let n = number of segments in the resource pattern.
-For segment at 0-based index i:
-  weight      = n - i          (leftmost segment has highest weight)
+Let totalSegments = number of segments in the resource pattern.
+For segment at 0-based resourceIndex:
+  weight      = totalSegments - resourceIndex   (leftmost segment has highest weight)
   exact match : segment score = weight × 2
   wildcard    : segment score = weight × 1
 
 Special case: global "*" → fixed score of 1 (lowest possible)
 ```
 
-**Worked example** — evaluating path `wallets/w1/transactions` (n=3, weights: 3, 2, 1):
+**Worked example** — evaluating path `wallets/w1/transactions` (totalSegments=3, weights: 3, 2, 1):
 
 | Pattern | Scoring | Total |
 |---|---|---|
@@ -660,7 +662,9 @@ curl -s -X POST http://localhost:8080/authorize \
 | `DefaultResourceMatcherTest` | All matching semantics: exact, non-terminal wildcard, terminal wildcard, global wildcard, boundary conditions |
 | `SpecificityScorerTest` | Position-weighted scoring: score ordering, tie detection, global wildcard baseline |
 | `TokenValidatorTest` | JWT claim validation: expiry, nbf, issuer, audience, optional audience skip |
-| `AuthorizationServiceImplTest` | End-to-end service with real PolicyEngine; mocked JWT provider and DB layer |
+| `AuthorizationServiceImplTest` | End-to-end service with real PolicyEngine; mocked JWT provider, Users table mapping, and DB layer |
+| `PermissionCacheTest` | Caffeine cache behaviour for permission lookups: cache hit, cache miss, key isolation, repeated calls |
+| `UserCacheTest` | Caffeine cache behaviour for user identity lookups: cache hit, cache miss, empty-result caching, composite key isolation |
 | `PathUtilsTest` | HTTP method mapping, path normalization |
 
 ### Key edge cases tested
@@ -670,6 +674,7 @@ curl -s -X POST http://localhost:8080/authorize \
 - Specific ALLOW at score 12 overrides broad DENY at score 1
 - Specific DENY at score 12 overrides broad ALLOW at score 5
 - Tied rules at the same score → deny-overrides-allow resolver fires
+- Valid token whose `sub` has no matching row in the `users` table → `AuthenticationException`
 - Token with missing `sub` claim → `AuthenticationException`
 - Token with `nbf` in the past → accepted; `nbf` in the future → rejected
 - Unsupported HTTP method → `IllegalArgumentException` → 400
@@ -697,9 +702,13 @@ HTTP methods are mapped to semantic actions (`read`, `write`, `delete`) at reque
 
 SQLite is used for simplicity and zero-dependency local operation. The repository is behind a `PermissionRepository` interface; swapping to PostgreSQL or MySQL requires only a new `JdbcPermissionRepository` implementation and a JDBC URL change — no service-layer code changes.
 
-### Permissions are cached, not real-time
+### Permissions and user mappings are cached, not real-time
 
-The Caffeine cache holds `(userId, action)` → `List<Permission>` for a configurable TTL (default 5 minutes). A permission revocation takes effect within one TTL window. This is an explicit trade-off: lower DB load at the cost of eventual consistency on revocations.
+The Caffeine cache holds two entry types:
+- `(userId, action)` → `List<Permission>` — permission lookups
+- `externalUserId` → `Optional<User>` — IdP-to-internal identity mappings
+
+Both share the same `users` and `permissions` caches with a configurable TTL (default 5 minutes). A permission revocation or user mapping change takes effect within one TTL window. This is an explicit trade-off: lower DB load at the cost of eventual consistency on revocations.
 
 ### Token validation is self-contained
 
